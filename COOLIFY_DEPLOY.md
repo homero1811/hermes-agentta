@@ -1,4 +1,4 @@
-# Coolify Deployment (Dashboard UI)
+# Coolify Deployment (Dashboard UI, Internet-Safe)
 
 This deploys Hermes web UI on Coolify and serves it at:
 
@@ -13,7 +13,7 @@ This deploys Hermes web UI on Coolify and serves it at:
 
 - Type: `Docker Compose`
 - Compose file: `docker-compose.coolify.yml`
-- Service to expose: `hermes-dashboard`
+- Service to expose: `hermes-dashboard` (Traefik-routed, no host port publish)
 - Internal port: `9119`
 - Domain: `hs.tsunamiautomation.com`
 - Enable HTTPS/Let's Encrypt in Coolify.
@@ -23,10 +23,10 @@ This deploys Hermes web UI on Coolify and serves it at:
 Set these in the resource:
 
 - `OPENAI_API_KEY` (or your preferred provider key such as `ANTHROPIC_API_KEY`)
+- `BASICAUTH_USERS` (Traefik BasicAuth users string, e.g. `admin:$$apr1$$...`)
 
 Optional:
-
-- `HERMES_DASHBOARD_TUI=1` (already effectively enabled by `--tui`)
+- Provider-specific keys for tools you want to use.
 
 ## 4. Persistent storage
 
@@ -37,7 +37,8 @@ Optional:
 - Click `Deploy` in Coolify.
 - After successful deploy, open `https://hs.tsunamiautomation.com`.
 
-## Notes
+## Security behavior
 
-- This exposes the dashboard over the internet; protect Coolify access tightly.
-- Hermes dashboard itself does not provide full external auth. Keep access limited at the proxy/network layer where possible.
+- No `ports:` host bind is used; service is internal-only and routed via Coolify/Traefik.
+- Dashboard runs without `--insecure`.
+- Access is protected by Traefik BasicAuth middleware (`BASICAUTH_USERS`).

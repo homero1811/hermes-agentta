@@ -4,13 +4,27 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    command: ["dashboard", "--host", "0.0.0.0", "--port", "9119", "--insecure", "--no-open", "--tui"]
+    command: ["dashboard", "--host", "0.0.0.0", "--port", "9119", "--no-open"]
     environment:
       HERMES_HOME: /opt/data
-      HERMES_UID: "10000"
-      HERMES_GID: "10000"
-    ports:
-      - "9119:9119"
+      # Set at deploy time in Coolify.
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    expose:
+      - "9119"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9119/api/status >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.hermes-dashboard.rule=Host(`hs.tsunamiautomation.com`)
+      - traefik.http.routers.hermes-dashboard.entrypoints=websecure
+      - traefik.http.routers.hermes-dashboard.tls=true
+      - traefik.http.services.hermes-dashboard.loadbalancer.server.port=9119
+      - traefik.http.middlewares.hermes-dashboard-auth.basicauth.users=${BASICAUTH_USERS}
+      - traefik.http.routers.hermes-dashboard.middlewares=hermes-dashboard-auth
     volumes:
       - hermes_data:/opt/data
 
