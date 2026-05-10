@@ -1,0 +1,18 @@
+services:
+  hermes-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["dashboard", "--host", "0.0.0.0", "--port", "9119", "--insecure", "--no-open", "--tui"]
+    environment:
+      HERMES_HOME: /opt/data
+      HERMES_UID: "10000"
+      HERMES_GID: "10000"
+    ports:
+      - "9119:9119"
+    volumes:
+      - hermes_data:/opt/data
+
+volumes:
+  hermes_data:
