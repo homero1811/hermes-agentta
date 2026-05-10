@@ -4,6 +4,9 @@ set -euo pipefail
 TARGET_HOST="${TARGET_HOST:-hs.tsunamiautomation.com}"
 TARGET_URL="https://${TARGET_HOST}"
 EXPECTED_IP="${EXPECTED_IP:-}"
+COOLIFY_BASE_URL="${COOLIFY_BASE_URL:-}"
+COOLIFY_TOKEN="${COOLIFY_TOKEN:-}"
+APP_UUID="${APP_UUID:-d1r6c08imoq58y5h20d33xuf}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${REPO_ROOT}/docker-compose.coolify.yml"
 
@@ -127,6 +130,32 @@ if command -v hermes >/dev/null 2>&1; then
   pass "hermes CLI responds"
 else
   warn "hermes executable not on PATH yet"
+fi
+
+if [[ -n "${COOLIFY_BASE_URL}" && -n "${COOLIFY_TOKEN}" ]]; then
+  require_cmd jq
+  pass "Running optional Coolify API checks"
+  health_payload="$(curl -fsS -H "Authorization: Bearer ${COOLIFY_TOKEN}" "${COOLIFY_BASE_URL%/}/health" || true)"
+  if [[ -z "${health_payload}" ]]; then
+    warn "Coolify /health check failed (possible control-plane issue)"
+  else
+    pass "Coolify /health reachable"
+  fi
+
+  dep_payload="$(curl -fsS -H "Authorization: Bearer ${COOLIFY_TOKEN}" "${COOLIFY_BASE_URL%/}/applications/${APP_UUID}/deployments" || true)"
+  if [[ -z "${dep_payload}" ]]; then
+    warn "Could not fetch deployment queue for ${APP_UUID}"
+  else
+    queued_count="$(printf '%s\n' "${dep_payload}" | jq '[.[] | select((.status // "") == "queued")] | length' 2>/dev/null || echo 0)"
+    active_count="$(printf '%s\n' "${dep_payload}" | jq '[.[] | select((.status // "") == "in_progress")] | length' 2>/dev/null || echo 0)"
+    if (( queued_count > 0 || active_count > 1 )); then
+      warn "Deployment queue contention detected (queued=${queued_count}, in_progress=${active_count})"
+    else
+      pass "Deployment queue state looks healthy (queued=${queued_count}, in_progress=${active_count})"
+    fi
+  fi
+else
+  warn "Skipping Coolify API checks (set COOLIFY_BASE_URL and COOLIFY_TOKEN to enable)"
 fi
 
 printf "\nReadiness checks completed for %s\n" "${TARGET_URL}"
