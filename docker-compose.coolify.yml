@@ -7,8 +7,10 @@ services:
     command: ["dashboard", "--host", "0.0.0.0", "--port", "9119", "--no-open"]
     environment:
       HERMES_HOME: /opt/data
-      # Set at deploy time in Coolify.
+      # Required: set at deploy time in Coolify.
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Required for proxy auth middleware label below.
+      BASICAUTH_USERS: ${BASICAUTH_USERS}
     expose:
       - "9119"
     healthcheck:
