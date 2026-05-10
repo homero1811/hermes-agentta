@@ -6,6 +6,12 @@ Target hostname: `https://hs.tsunamiautomation.com`
 
 Deploy Hermes dashboard on Coolify with HTTPS, proxy-layer authentication, persistent data, health checks, and a defined rollback path.
 
+Automation helper:
+
+- `scripts/coolify_prod_readiness.sh`
+- Runs preflight, compose security assertions, DNS resolution, and public URL reachability checks.
+- Optional strict DNS match: `EXPECTED_IP=<coolify-public-ipv4> scripts/coolify_prod_readiness.sh`
+
 ## Blocking security requirements
 
 - Never deploy with `--insecure`.
@@ -48,6 +54,7 @@ Persistent data:
 3. Confirm there is no host port binding.
 4. Deploy from Coolify.
 5. Wait for service health to turn green.
+6. Run `scripts/coolify_prod_readiness.sh` and confirm all required checks pass.
 
 ## Go/No-Go validation gates
 
