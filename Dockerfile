@@ -59,12 +59,17 @@ COPY ui-tui/packages/hermes-ink/ ui-tui/packages/hermes-ink/
 # `npm install` that then fails with EACCES (node_modules/ is root-owned from
 # build time).
 ENV npm_config_install_links=false
+ENV npm_config_cache=/tmp/npm-cache
 
 RUN npm install --prefer-offline --no-audit && \
-    npx playwright install chromium --only-shell && \
-    (cd web && npm install --prefer-offline --no-audit) && \
-    (cd ui-tui && npm install --prefer-offline --no-audit) && \
-    npm cache clean --force
+    rm -rf /tmp/npm-cache
+RUN npx playwright install chromium --only-shell && \
+    rm -rf /tmp/npm-cache
+RUN cd web && npm install --prefer-offline --no-audit && \
+    rm -rf /tmp/npm-cache
+RUN cd ui-tui && npm install --prefer-offline --no-audit && \
+    npm cache clean --force && \
+    rm -rf /tmp/npm-cache
 
 # ---------- Layer-cached Python dependency install ----------
 # Copy only pyproject.toml + uv.lock so the Python dep resolve + wheel
