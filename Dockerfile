@@ -1,5 +1,6 @@
 FROM ghcr.io/astral-sh/uv:0.11.6-python3.13-trixie@sha256:b3c543b6c4f23a5f2df22866bd7857e5d304b67a564f4feab6ac22044dde719b AS uv_source
 FROM tianon/gosu:1.19-trixie@sha256:3b176695959c71e123eb390d427efc665eeb561b1540e82679c15e992006b8b9 AS gosu_source
+FROM node:22-bookworm-slim AS node_source
 FROM debian:13.4
 
 # Disable Python stdout buffering to ensure logs are printed immediately
@@ -16,7 +17,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
 # not run a second apt-get during the npm layer.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    build-essential curl wget nodejs npm python3 ripgrep ffmpeg gcc python3-dev libffi-dev procps git openssh-client docker-cli tini \
+    build-essential curl wget python3 ripgrep ffmpeg gcc python3-dev libffi-dev procps git openssh-client docker-cli tini \
     at-spi2-common fonts-freefont-ttf fonts-ipafont-gothic fonts-liberation fonts-noto-color-emoji fonts-tlwg-loma-otf fonts-unifont fonts-wqy-zenhei \
     libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 libavahi-client3 libavahi-common-data libavahi-common3 libcups2t64 libfontenc1 \
     libice6 libnspr4 libnss3 libsm6 libunwind8 libxaw7 libxcomposite1 libxdamage1 libxfont2 libxkbfile1 libxmu6 libxpm4 libxt6t64 \
@@ -28,6 +29,10 @@ RUN useradd -u 10000 -m -d /opt/data hermes
 
 COPY --chmod=0755 --from=gosu_source /gosu /usr/local/bin/
 COPY --chmod=0755 --from=uv_source /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
+COPY --from=node_source /usr/local/bin/node /usr/local/bin/
+COPY --from=node_source /usr/local/bin/npm /usr/local/bin/
+COPY --from=node_source /usr/local/bin/npx /usr/local/bin/
+COPY --from=node_source /usr/local/lib/node_modules /usr/local/lib/node_modules
 
 WORKDIR /opt/hermes
 
@@ -45,14 +50,12 @@ COPY ui-tui/package.json ui-tui/package-lock.json ui-tui/
 COPY ui-tui/packages/hermes-ink/ ui-tui/packages/hermes-ink/
 
 # `npm_config_install_links=false` forces npm to install `file:` deps as
-# symlinks (the npm 10+ default) even on Debian's older bundled npm 9.x,
-# which defaults to `install-links=true` and installs file deps as *copies*.
-# The host-side package-lock.json is generated with a newer npm that uses
-# symlinks, so an install-as-copy produces a hidden node_modules/.package-lock.json
-# that permanently disagrees with the root lock on the @hermes/ink entry.
-# That disagreement trips the TUI launcher's `_tui_need_npm_install()`
-# check on every startup and triggers a runtime `npm install` that then
-# fails with EACCES (node_modules/ is root-owned from build time).
+# symlinks (the npm 10+ default).  Installing as copies produces a hidden
+# node_modules/.package-lock.json that permanently disagrees with the root
+# lock on the @hermes/ink entry. That disagreement trips the TUI launcher's
+# `_tui_need_npm_install()` check on every startup and triggers a runtime
+# `npm install` that then fails with EACCES (node_modules/ is root-owned from
+# build time).
 ENV npm_config_install_links=false
 
 RUN npm install --prefer-offline --no-audit && \
