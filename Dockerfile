@@ -30,9 +30,11 @@ RUN useradd -u 10000 -m -d /opt/data hermes
 COPY --chmod=0755 --from=gosu_source /gosu /usr/local/bin/
 COPY --chmod=0755 --from=uv_source /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
 COPY --from=node_source /usr/local/bin/node /usr/local/bin/
-COPY --from=node_source /usr/local/bin/npm /usr/local/bin/
-COPY --from=node_source /usr/local/bin/npx /usr/local/bin/
 COPY --from=node_source /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
+    npm --version && \
+    npx --version
 
 WORKDIR /opt/hermes
 
