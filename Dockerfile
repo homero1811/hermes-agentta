@@ -1,5 +1,6 @@
 FROM ghcr.io/astral-sh/uv:0.11.6-python3.13-trixie@sha256:b3c543b6c4f23a5f2df22866bd7857e5d304b67a564f4feab6ac22044dde719b AS uv_source
 FROM tianon/gosu:1.19-trixie@sha256:3b176695959c71e123eb390d427efc665eeb561b1540e82679c15e992006b8b9 AS gosu_source
+FROM node:22-bookworm-slim AS node_source
 FROM debian:13.4
 
 # Disable Python stdout buffering to ensure logs are printed immediately
@@ -9,21 +10,35 @@ ENV PYTHONUNBUFFERED=1
 # install survives the /opt/data volume overlay at runtime.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
 
-# Install system dependencies in one layer, clear APT cache
+# Install system dependencies in one layer, clear APT cache.
 # tini reaps orphaned zombie processes (MCP stdio subprocesses, git, bun, etc.)
 # that would otherwise accumulate when hermes runs as PID 1. See #15012.
+# Playwright OS dependencies are installed here so the later browser install does
+# not run a second apt-get during the npm layer.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    build-essential curl nodejs npm python3 ripgrep ffmpeg gcc python3-dev libffi-dev procps git openssh-client docker-cli tini && \
-    rm -rf /var/lib/apt/lists/*
+    build-essential curl wget python3 ripgrep ffmpeg gcc python3-dev libffi-dev procps git openssh-client docker-cli tini \
+    at-spi2-common fonts-freefont-ttf fonts-ipafont-gothic fonts-liberation fonts-noto-color-emoji fonts-tlwg-loma-otf fonts-unifont fonts-wqy-zenhei \
+    libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 libavahi-client3 libavahi-common-data libavahi-common3 libcups2t64 libfontenc1 \
+    libice6 libnspr4 libnss3 libsm6 libunwind8 libxaw7 libxcomposite1 libxdamage1 libxfont2 libxkbfile1 libxmu6 libxpm4 libxt6t64 \
+    x11-xkb-utils xfonts-encodings xfonts-scalable xfonts-utils xserver-common xvfb && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
 # Non-root user for runtime; UID can be overridden via HERMES_UID at runtime
 RUN useradd -u 10000 -m -d /opt/data hermes
 
 COPY --chmod=0755 --from=gosu_source /gosu /usr/local/bin/
 COPY --chmod=0755 --from=uv_source /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
+COPY --from=node_source /usr/local/bin/node /usr/local/bin/
+COPY --from=node_source /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
+    npm --version && \
+    npx --version
 
 WORKDIR /opt/hermes
+RUN chown hermes:hermes /opt/hermes
+USER hermes
 
 # ---------- Layer-cached dependency install ----------
 # Copy only package manifests first so npm install + Playwright are cached
@@ -33,27 +48,30 @@ WORKDIR /opt/hermes
 # because it is referenced as a `file:` workspace dependency from
 # ui-tui/package.json.  Copying the tree up front lets npm resolve the
 # workspace to real content instead of stopping at a bare package.json.
-COPY package.json package-lock.json ./
-COPY web/package.json web/package-lock.json web/
-COPY ui-tui/package.json ui-tui/package-lock.json ui-tui/
-COPY ui-tui/packages/hermes-ink/ ui-tui/packages/hermes-ink/
+COPY --chown=hermes:hermes package.json package-lock.json ./
+COPY --chown=hermes:hermes web/package.json web/package-lock.json web/
+COPY --chown=hermes:hermes ui-tui/package.json ui-tui/package-lock.json ui-tui/
+COPY --chown=hermes:hermes ui-tui/packages/hermes-ink/ ui-tui/packages/hermes-ink/
 
 # `npm_config_install_links=false` forces npm to install `file:` deps as
-# symlinks (the npm 10+ default) even on Debian's older bundled npm 9.x,
-# which defaults to `install-links=true` and installs file deps as *copies*.
-# The host-side package-lock.json is generated with a newer npm that uses
-# symlinks, so an install-as-copy produces a hidden node_modules/.package-lock.json
-# that permanently disagrees with the root lock on the @hermes/ink entry.
-# That disagreement trips the TUI launcher's `_tui_need_npm_install()`
-# check on every startup and triggers a runtime `npm install` that then
-# fails with EACCES (node_modules/ is root-owned from build time).
+# symlinks (the npm 10+ default).  Installing as copies produces a hidden
+# node_modules/.package-lock.json that permanently disagrees with the root
+# lock on the @hermes/ink entry. That disagreement trips the TUI launcher's
+# `_tui_need_npm_install()` check on every startup and triggers a runtime
+# `npm install` that then fails with EACCES (node_modules/ is root-owned from
+# build time).
 ENV npm_config_install_links=false
+ENV npm_config_cache=/tmp/npm-cache
 
 RUN npm install --prefer-offline --no-audit && \
-    npx playwright install --with-deps chromium --only-shell && \
-    (cd web && npm install --prefer-offline --no-audit) && \
-    (cd ui-tui && npm install --prefer-offline --no-audit) && \
-    npm cache clean --force
+    rm -rf /tmp/npm-cache
+RUN npx playwright install chromium --only-shell && \
+    rm -rf /tmp/npm-cache
+RUN cd web && npm install --prefer-offline --no-audit && \
+    rm -rf /tmp/npm-cache
+RUN cd ui-tui && npm install --prefer-offline --no-audit && \
+    npm cache clean --force && \
+    rm -rf /tmp/npm-cache
 
 # ---------- Layer-cached Python dependency install ----------
 # Copy only pyproject.toml + uv.lock so the Python dep resolve + wheel
@@ -74,7 +92,7 @@ RUN npm install --prefer-offline --no-audit && \
 # redundancy), none of which belong in the published container.
 #
 # The editable link is created after the source copy below.
-COPY pyproject.toml uv.lock ./
+COPY --chown=hermes:hermes pyproject.toml uv.lock ./
 RUN touch ./README.md
 RUN uv sync --frozen --no-install-project --extra all
 
@@ -86,17 +104,9 @@ COPY --chown=hermes:hermes . .
 RUN cd web && npm run build && \
     cd ../ui-tui && npm run build
 
-# ---------- Permissions ----------
-# Make install dir world-readable so any HERMES_UID can read it at runtime.
-# The venv needs to be traversable too.
-# node_modules trees additionally need to be writable by the hermes user
-# so the runtime `npm install` triggered by _tui_need_npm_install() in
-# hermes_cli/main.py succeeds (see #18800). /opt/hermes/web is build-time
-# only (HERMES_WEB_DIST points at hermes_cli/web_dist) and is intentionally
-# not chowned here.
-USER root
-RUN chmod -R a+rX /opt/hermes && \
-    chown -R hermes:hermes /opt/hermes/ui-tui /opt/hermes/node_modules
+# ---------- Runtime ownership ----------
+# Dependency installs and build outputs are created as hermes, avoiding a cold
+# build recursive chmod/chown over node_modules that can stall Coolify workers.
 # Start as root so the entrypoint can usermod/groupmod + gosu.
 # If HERMES_UID is unset, the entrypoint drops to the default hermes user (10000).
 
@@ -104,6 +114,8 @@ RUN chmod -R a+rX /opt/hermes && \
 # Deps are already installed in the cached layer above; `--no-deps` makes
 # this a fast (~1s) egg-link creation with no resolution or downloads.
 RUN uv pip install --no-cache-dir --no-deps -e "."
+
+USER root
 
 # ---------- Runtime ----------
 ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
