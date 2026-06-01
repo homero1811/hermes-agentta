@@ -37,6 +37,8 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     npx --version
 
 WORKDIR /opt/hermes
+RUN chown hermes:hermes /opt/hermes
+USER hermes
 
 # ---------- Layer-cached dependency install ----------
 # Copy only package manifests first so npm install + Playwright are cached
@@ -46,10 +48,10 @@ WORKDIR /opt/hermes
 # because it is referenced as a `file:` workspace dependency from
 # ui-tui/package.json.  Copying the tree up front lets npm resolve the
 # workspace to real content instead of stopping at a bare package.json.
-COPY package.json package-lock.json ./
-COPY web/package.json web/package-lock.json web/
-COPY ui-tui/package.json ui-tui/package-lock.json ui-tui/
-COPY ui-tui/packages/hermes-ink/ ui-tui/packages/hermes-ink/
+COPY --chown=hermes:hermes package.json package-lock.json ./
+COPY --chown=hermes:hermes web/package.json web/package-lock.json web/
+COPY --chown=hermes:hermes ui-tui/package.json ui-tui/package-lock.json ui-tui/
+COPY --chown=hermes:hermes ui-tui/packages/hermes-ink/ ui-tui/packages/hermes-ink/
 
 # `npm_config_install_links=false` forces npm to install `file:` deps as
 # symlinks (the npm 10+ default).  Installing as copies produces a hidden
@@ -90,7 +92,7 @@ RUN cd ui-tui && npm install --prefer-offline --no-audit && \
 # redundancy), none of which belong in the published container.
 #
 # The editable link is created after the source copy below.
-COPY pyproject.toml uv.lock ./
+COPY --chown=hermes:hermes pyproject.toml uv.lock ./
 RUN touch ./README.md
 RUN uv sync --frozen --no-install-project --extra all
 
@@ -102,17 +104,9 @@ COPY --chown=hermes:hermes . .
 RUN cd web && npm run build && \
     cd ../ui-tui && npm run build
 
-# ---------- Permissions ----------
-# Make install dir world-readable so any HERMES_UID can read it at runtime.
-# The venv needs to be traversable too.
-# node_modules trees additionally need to be writable by the hermes user
-# so the runtime `npm install` triggered by _tui_need_npm_install() in
-# hermes_cli/main.py succeeds (see #18800). /opt/hermes/web is build-time
-# only (HERMES_WEB_DIST points at hermes_cli/web_dist) and is intentionally
-# not chowned here.
-USER root
-RUN chmod -R a+rX /opt/hermes && \
-    chown -R hermes:hermes /opt/hermes/ui-tui /opt/hermes/node_modules
+# ---------- Runtime ownership ----------
+# Dependency installs and build outputs are created as hermes, avoiding a cold
+# build recursive chmod/chown over node_modules that can stall Coolify workers.
 # Start as root so the entrypoint can usermod/groupmod + gosu.
 # If HERMES_UID is unset, the entrypoint drops to the default hermes user (10000).
 
@@ -120,6 +114,8 @@ RUN chmod -R a+rX /opt/hermes && \
 # Deps are already installed in the cached layer above; `--no-deps` makes
 # this a fast (~1s) egg-link creation with no resolution or downloads.
 RUN uv pip install --no-cache-dir --no-deps -e "."
+
+USER root
 
 # ---------- Runtime ----------
 ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
